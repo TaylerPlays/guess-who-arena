@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, HelpCircle, Crosshair, Lightbulb, Users, ShieldAlert, User, Check, X, SkipForward, Loader2, Trophy, ArrowRight, Flag, Dices, LogOut, Info, VolumeX, SlidersHorizontal, Eye, EyeOff, Play, Pause, SkipBack, Music } from 'lucide-react';
+import { Send, HelpCircle, Crosshair, Lightbulb, Users, ShieldAlert, User, Check, X, SkipForward, Loader2, Trophy, ArrowRight, Flag, Dices, LogOut, Info, VolumeX, SlidersHorizontal, Eye, EyeOff, Play, Pause, SkipBack, Music, Skull, Flame } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 // --- GAMING & TRAP PLAYLIST ---
@@ -15,9 +15,8 @@ const LOFI_PLAYLIST = [
   { title: "Criminal Gangster Beat", url: "https://cdn.pixabay.com/audio/2026/07/09/audio_762dee58d6.mp3", link: "https://pixabay.com/music/trap-criminal-gangster-beat-beats-564493/" }
 ];
 
-// Global Audio Context so React never wipes or freezes the sound files
+// Global Audio Context 
 const audioContext = {
-  click: new Audio('https://cdn.pixabay.com/audio/2024/03/26/audio_45df45c96e.mp3'),
   success: new Audio('https://cdnjs.cloudflare.com/ajax/libs/ion-sound/3.0.7/sounds/glass_drop.mp3'),     
   fail: new Audio('https://cdnjs.cloudflare.com/ajax/libs/ion-sound/3.0.7/sounds/branch_break.mp3'),      
   yes: new Audio('https://cdnjs.cloudflare.com/ajax/libs/ion-sound/3.0.7/sounds/button_tiny.mp3'),        
@@ -77,8 +76,10 @@ export default function App() {
   const [gameState, setGameState] = useState('lobby'); 
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
+  const [playerAvatar, setPlayerAvatar] = useState(null); 
   const [currentRoomId, setCurrentRoomId] = useState(null);
   const [myPlayerId, setMyPlayerId] = useState(null);
+  const [roomModifiers, setRoomModifiers] = useState({});
 
   const [turnAction, setTurnAction] = useState('question');
   const [inputText, setInputText] = useState('');
@@ -95,32 +96,57 @@ export default function App() {
   const [efficiencyMessage, setEfficiencyMessage] = useState('');
   const [isLockingIn, setIsLockingIn] = useState(false);
   
-  // --- Simple Audio State ---
+  // --- Audio & Scrolling Refs ---
   const bgMusicRef = useRef(null);
   const audioMenuRef = useRef(null);
+  const logEndRef = useRef(null);
   
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
-  const [isMusicPlaying, setIsMusicPlaying] = useState(true); // Direct intentional control
-  const [bannerState, setBannerState] = useState('idle'); // 'idle' | 'now-playing' | 'song-name'
+  const [isMusicPlaying, setIsMusicPlaying] = useState(true); 
+  const [bannerState, setBannerState] = useState('idle'); 
   
   const [musicVolume, setMusicVolume] = useState(0.12);
   const [sfxVolume, setSfxVolume] = useState(0.6);
   const sfxVolumeRef = useRef(0.6); 
   const [hasInteracted, setHasInteracted] = useState(false);
 
-  // Sync SFX state ref so the event listener always knows current volume
+  // Safely auto-crop and compress uploaded profile pictures to tiny base64 strings
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 150;
+        
+        const size = Math.min(img.width, img.height);
+        const startX = (img.width - size) / 2;
+        const startY = (img.height - size) / 2;
+
+        canvas.width = MAX_SIZE;
+        canvas.height = MAX_SIZE;
+        const ctx = canvas.getContext('2d');
+        
+        ctx.drawImage(img, startX, startY, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
+        setPlayerAvatar(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
   useEffect(() => {
     sfxVolumeRef.current = sfxVolume;
   }, [sfxVolume]);
 
-  // Central Audio Overseer - rigidly enforces the play/pause state
   useEffect(() => {
     const audio = bgMusicRef.current;
     if (!audio) return;
-
     audio.volume = musicVolume;
-
     if (hasInteracted && isMusicPlaying && musicVolume > 0) {
       audio.play().catch(e => console.log("Play blocked by browser:", e));
     } else {
@@ -128,23 +154,14 @@ export default function App() {
     }
   }, [currentTrackIndex, isMusicPlaying, musicVolume, hasInteracted]);
 
-  // Smart Banner Animation: Strictly animates ONLY when track changes and IS playing
   useEffect(() => {
     if (!hasInteracted || !isMusicPlaying) {
       setBannerState('idle');
       return;
     }
-    
     setBannerState('now-playing');
-    
-    const t1 = setTimeout(() => {
-      setBannerState('song-name');
-    }, 1500);
-
-    const t2 = setTimeout(() => {
-      setBannerState('idle');
-    }, 5500);
-
+    const t1 = setTimeout(() => { setBannerState('song-name'); }, 1500);
+    const t2 = setTimeout(() => { setBannerState('idle'); }, 5500);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [currentTrackIndex, isMusicPlaying, hasInteracted]);
 
@@ -156,34 +173,19 @@ export default function App() {
     }
   };
 
-  const togglePlayPause = () => {
-    // Explicitly toggle the user's intent to listen to music
-    setIsMusicPlaying(!isMusicPlaying);
-  };
+  const togglePlayPause = () => setIsMusicPlaying(!isMusicPlaying);
+  const playNextTrack = () => setCurrentTrackIndex((prev) => (prev + 1) % LOFI_PLAYLIST.length);
+  const playPreviousTrack = () => setCurrentTrackIndex((prev) => (prev - 1 + LOFI_PLAYLIST.length) % LOFI_PLAYLIST.length);
 
-  const playNextTrack = () => {
-    setCurrentTrackIndex((prev) => (prev + 1) % LOFI_PLAYLIST.length);
-  };
-
-  const playPreviousTrack = () => {
-    setCurrentTrackIndex((prev) => (prev - 1 + LOFI_PLAYLIST.length) % LOFI_PLAYLIST.length);
-  };
-
-  // Global bypass for browser autoplay policies: starts music immediately on first click
   useEffect(() => {
-    const handleFirstClick = () => {
-      if (!hasInteracted) setHasInteracted(true);
-    };
+    const handleFirstClick = () => { if (!hasInteracted) setHasInteracted(true); };
     document.addEventListener('click', handleFirstClick, { once: true });
     return () => document.removeEventListener('click', handleFirstClick);
   }, [hasInteracted]);
 
-  // Close audio menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (audioMenuRef.current && !audioMenuRef.current.contains(event.target)) {
-        setShowAudioMenu(false);
-      }
+      if (audioMenuRef.current && !audioMenuRef.current.contains(event.target)) setShowAudioMenu(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -198,6 +200,11 @@ export default function App() {
   const currentTarget = players.find(p => p.is_target) || {};
   const currentPlayer = players.find(p => p.is_current_turn) || {};
   const hasSecretAccess = myPlayer.is_target || myPlayer.has_guessed_correctly || myPlayer.is_eliminated;
+
+  // Auto-scroll Intel Log perfectly
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history]);
 
   useEffect(() => {
     const storedRoomId = sessionStorage.getItem('gw_roomId');
@@ -223,6 +230,7 @@ export default function App() {
     const roomChannel = supabase.channel(`room-${currentRoomId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${currentRoomId}` }, (payload) => {
         setGameState(payload.new.status);
+        setRoomModifiers(payload.new.modifiers || {});
         
         if (payload.new.status === 'draft') {
            setHistory([]);
@@ -246,7 +254,6 @@ export default function App() {
         fetchLogs(currentRoomId);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'logs', filter: `room_id=eq.${currentRoomId}` }, (payload) => {
-        // Universal SFX: Play answer sounds for ALL players simultaneously
         if (payload.new.answer && (!payload.old || payload.new.answer !== payload.old.answer)) {
            if (payload.new.answer === 'Yes') playSound('yes');
            else if (payload.new.answer === 'No') playSound('no');
@@ -269,6 +276,7 @@ export default function App() {
     if (room) {
       setGameState(room.status);
       setRoomCode(room.code);
+      setRoomModifiers(room.modifiers || {});
     }
     fetchPlayers(roomId);
     fetchLogs(roomId);
@@ -311,7 +319,7 @@ export default function App() {
       let { data: room } = await supabase.from('rooms').select('*').eq('code', code).single();
 
       if (!room) {
-        const { data: newRoom, error: createError } = await supabase.from('rooms').insert([{ code, status: 'draft', wrong_guesses: 0 }]).select().single();
+        const { data: newRoom, error: createError } = await supabase.from('rooms').insert([{ code, status: 'waiting', wrong_guesses: 0, modifiers: {} }]).select().single();
         if (createError) throw new Error("Failed to create room: " + createError.message);
         room = newRoom;
       }
@@ -319,10 +327,10 @@ export default function App() {
       const { data: existingPlayers } = await supabase.from('players').select('id').eq('room_id', room.id);
       const isFirstPlayer = existingPlayers.length === 0;
 
-      if (isFirstPlayer && room.status !== 'draft') {
-        await supabase.from('rooms').update({ status: 'draft', wrong_guesses: 0 }).eq('id', room.id);
+      if (isFirstPlayer && room.status !== 'waiting') {
+        await supabase.from('rooms').update({ status: 'waiting', wrong_guesses: 0, modifiers: {} }).eq('id', room.id);
         await supabase.from('logs').delete().eq('room_id', room.id);
-        room.status = 'draft';
+        room.status = 'waiting';
       }
 
       setCurrentRoomId(room.id);
@@ -331,9 +339,11 @@ export default function App() {
       const { data: newPlayer, error: playerError } = await supabase.from('players').insert([{
         room_id: room.id,
         name: playerName.trim(),
-        is_current_turn: isFirstPlayer, 
-        is_target: isFirstPlayer, 
-        has_been_target: isFirstPlayer,      
+        avatar_url: playerAvatar,
+        is_current_turn: false, 
+        is_target: false, 
+        has_been_target: false,      
+        secret_character: 'unselected', 
         score: 0,
         questions_asked: 0,
         is_eliminated: false,
@@ -363,13 +373,56 @@ export default function App() {
     setShowEfficiencyPopup(false);
   };
 
+  const handleModifierToggle = async (key, value) => {
+    const newMods = { ...roomModifiers, [key]: value };
+    setRoomModifiers(newMods);
+    await supabase.from('rooms').update({ modifiers: newMods }).eq('id', currentRoomId);
+  };
+
+  const handleSetRolePref = async (role) => {
+    await supabase.from('players').update({ secret_character: role }).eq('id', myPlayerId);
+  };
+
+  const handleStartMatch = async () => {
+    const { data: freshPlayers } = await supabase.from('players').select('*').eq('room_id', currentRoomId).order('joined_at', { ascending: true });
+
+    const hotseatWannabes = freshPlayers.filter(p => p.secret_character === 'hotseat');
+
+    let chosenTarget;
+    if (hotseatWannabes.length > 0) {
+      const randomIndex = Math.floor(Math.random() * hotseatWannabes.length);
+      chosenTarget = hotseatWannabes[randomIndex];
+    } else {
+      const randomIndex = Math.floor(Math.random() * freshPlayers.length);
+      chosenTarget = freshPlayers[randomIndex];
+    }
+
+    await supabase.from('rooms').update({ status: 'draft' }).eq('id', currentRoomId);
+
+    for (let p of freshPlayers) {
+      const isTarget = p.id === chosenTarget.id;
+      await supabase.from('players').update({
+        is_target: isTarget,
+        is_current_turn: isTarget,
+        has_been_target: isTarget,
+        secret_character: '', 
+        score: 0,
+        questions_asked: 0,
+        has_guessed_correctly: false,
+        is_eliminated: false,
+        can_guess: true
+      }).eq('id', p.id);
+    }
+  };
+
   const handleLockIn = async () => {
-    if (!secretCharacter.trim() || players.length < 2 || isLockingIn) return;
+    const isHintMissing = !roomModifiers.noHints && !startingHint.trim();
+    if (!secretCharacter.trim() || isHintMissing || players.length < 2 || isLockingIn) return;
     setIsLockingIn(true); 
 
     try {
       await supabase.from('players').update({ secret_character: secretCharacter, starting_hint: startingHint }).eq('id', myPlayerId);
-      if (startingHint.trim()) {
+      if (startingHint.trim() && !roomModifiers.noHints) {
         await supabase.from('logs').insert([{ room_id: currentRoomId, log_type: 'hint', log_text: startingHint }]);
       }
       
@@ -425,14 +478,24 @@ export default function App() {
         else if (newWrongCount === 2) pointsForHotSeat = 3;
         else if (newWrongCount >= 3) pointsForHotSeat = 5;
 
+        if (roomModifiers.highStakes) pointsForHotSeat *= 2;
+
         const { data: targetData } = await supabase.from('players').select('score').eq('id', currentTarget.id).single();
         await supabase.from('players').update({ 
           score: (targetData.score || 0) + pointsForHotSeat 
         }).eq('id', currentTarget.id);
 
-        setInputText('');
-        setTurnAction('question');
-        advanceTurn(); 
+        if (roomModifiers.suddenDeath) {
+          await supabase.from('logs').insert([{ room_id: currentRoomId, log_type: 'system', log_text: `${myPlayer.name} guessed incorrectly and was eliminated by Sudden Death!` }]);
+          await supabase.from('players').update({ is_eliminated: true }).eq('id', myPlayerId);
+          setInputText('');
+          setTurnAction('question');
+          processRoundEnd(); 
+        } else {
+          setInputText('');
+          setTurnAction('question');
+          advanceTurn(); 
+        }
       }
     }
   };
@@ -511,7 +574,10 @@ export default function App() {
   const handleNextRound = async () => {
     const { data: freshPlayers } = await supabase.from('players').select('*').eq('room_id', currentRoomId).order('joined_at', { ascending: true });
     
-    const nextTarget = freshPlayers.find(p => !p.has_been_target);
+    const eligibleTargets = freshPlayers.filter(p => !p.has_been_target);
+    const nextTarget = eligibleTargets.length > 0 
+      ? eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)]
+      : freshPlayers[0]; 
 
     await supabase.from('rooms').update({ status: 'draft', wrong_guesses: 0 }).eq('id', currentRoomId);
     await supabase.from('logs').delete().eq('room_id', currentRoomId);
@@ -557,20 +623,20 @@ export default function App() {
   const handleStartNewGame = async () => {
     const { data: freshPlayers } = await supabase.from('players').select('*').eq('room_id', currentRoomId).order('joined_at', { ascending: true });
     
-    await supabase.from('rooms').update({ status: 'draft', wrong_guesses: 0 }).eq('id', currentRoomId);
+    await supabase.from('rooms').update({ status: 'waiting', wrong_guesses: 0 }).eq('id', currentRoomId);
     await supabase.from('logs').delete().eq('room_id', currentRoomId);
 
     for (let p of freshPlayers) {
-      const isRoomHost = p.id === freshPlayers[0].id;
       await supabase.from('players').update({
         has_guessed_correctly: false,
         is_eliminated: false,
         can_guess: true,
         score: 0,
         questions_asked: 0,
-        is_target: isRoomHost,
-        is_current_turn: isRoomHost,
-        has_been_target: isRoomHost 
+        is_target: false,
+        is_current_turn: false,
+        has_been_target: false,
+        secret_character: 'unselected' 
       }).eq('id', p.id);
     }
   };
@@ -596,7 +662,6 @@ export default function App() {
         
         <div className="flex gap-2 items-center">
           
-          {/* Animated Audio Controls Menu Moved to the Far Left! */}
           <div className="relative" ref={audioMenuRef}>
             <motion.button 
               layout
@@ -634,7 +699,6 @@ export default function App() {
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
                   className="absolute right-0 top-12 w-72 bg-neutral-900 border border-neutral-700 p-5 rounded-2xl shadow-2xl z-50 flex flex-col gap-6"
                 >
-                  {/* Now Playing Widget */}
                   <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800 shadow-inner flex flex-col items-center gap-3">
                     <div className="flex items-center gap-2 text-rose-400 mb-1 w-full justify-center">
                       <Music size={16} /> 
@@ -668,7 +732,7 @@ export default function App() {
                     <input 
                       type="range" min="0" max="0.5" step="0.01" 
                       value={musicVolume} 
-                      onChange={(e) => setMusicVolume(parseFloat(e.target.value))} 
+                      onChange={(e) => handleMusicVolumeChange(parseFloat(e.target.value))} 
                       className="w-full accent-indigo-500 cursor-pointer" 
                     />
                   </div>
@@ -680,7 +744,7 @@ export default function App() {
                     <input 
                       type="range" min="0" max="1" step="0.01" 
                       value={sfxVolume} 
-                      onChange={(e) => setSfxVolume(parseFloat(e.target.value))} 
+                      onChange={(e) => handleSfxVolumeChange(parseFloat(e.target.value))} 
                       className="w-full accent-rose-500 cursor-pointer" 
                     />
                   </div>
@@ -691,7 +755,7 @@ export default function App() {
 
           {/* Blurred Lobby Code Button */}
           {currentRoomId && roomCode && (
-            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 transition-all">
+            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 transition-all mr-2">
                <span className="text-xs text-gray-500 uppercase font-bold hidden md:inline">Code:</span>
                <span className={`font-mono font-bold tracking-widest text-indigo-400 transition-all duration-300 ${!showRoomCode ? 'blur-[4px] select-none' : ''}`}>
                   {roomCode}
@@ -773,6 +837,23 @@ export default function App() {
                 <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-rose-400">Join Match</h1>
                 <p className="text-gray-400">Enter the room code to join your friends.</p>
               </div>
+
+              {/* Profile Picture Uploader */}
+              <div className="flex flex-col items-center mt-2 space-y-2">
+                 <div className="relative w-24 h-24 rounded-full border-2 border-dashed border-neutral-700 bg-neutral-950 flex items-center justify-center overflow-hidden cursor-pointer hover:border-indigo-500 transition-colors group">
+                    {playerAvatar ? (
+                       <img src={playerAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                       <User size={32} className="text-gray-500 group-hover:text-indigo-400 transition-colors" />
+                    )}
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                       <span className="text-[10px] font-bold uppercase tracking-widest">Upload</span>
+                    </div>
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" title="Upload Profile Picture (Optional)" />
+                 </div>
+                 <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">(Optional)</span>
+              </div>
+
               <div className="space-y-4">
                 <input type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="Your Name" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 focus:border-indigo-500 focus:outline-none text-lg text-center font-bold tracking-wider" />
                 
@@ -789,14 +870,71 @@ export default function App() {
             </motion.div>
           )}
 
+          {gameState === 'waiting' && (
+             <motion.div key="waiting" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-[2rem] p-8 shadow-2xl flex flex-col space-y-6 relative z-10">
+                <div className="text-center space-y-2 border-b border-neutral-800 pb-6">
+                   <Users size={40} className="mx-auto text-indigo-500 mb-4" />
+                   <h2 className="text-3xl font-bold">Waiting Room</h2>
+                   <p className="text-gray-400">Select your preferred role for Round 1.</p>
+                </div>
+
+                <div className="space-y-4">
+                   <div className="flex gap-4">
+                      <button onClick={() => handleSetRolePref('hotseat')} className={`flex-1 py-4 rounded-xl font-bold border-2 transition-all flex flex-col items-center gap-2 ${myPlayer.secret_character === 'hotseat' ? 'bg-rose-600/20 border-rose-500 text-rose-400' : 'bg-neutral-950 border-neutral-800 text-gray-500 hover:border-gray-600'}`}>
+                        <span className="text-3xl">🔥</span>
+                        Hot Seat
+                      </button>
+                      <button onClick={() => handleSetRolePref('guesser')} className={`flex-1 py-4 rounded-xl font-bold border-2 transition-all flex flex-col items-center gap-2 ${myPlayer.secret_character === 'guesser' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-neutral-950 border-neutral-800 text-gray-500 hover:border-gray-600'}`}>
+                        <span className="text-3xl">🕵️</span>
+                        Guesser
+                      </button>
+                   </div>
+                </div>
+
+                <div className="space-y-3 max-h-48 overflow-y-auto pr-2 scrollbar-hide pt-2">
+                   <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-3">Players Joined ({players.length})</h3>
+                   {players.map(p => (
+                      <div key={p.id} className="flex justify-between items-center bg-neutral-950/50 p-3 rounded-xl border border-neutral-800">
+                         <div className="flex items-center gap-3">
+                            {p.avatar_url ? (
+                               <img src={p.avatar_url} className="w-8 h-8 rounded-full object-cover border border-neutral-700 flex-shrink-0" alt="avatar" />
+                            ) : (
+                               <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700 flex-shrink-0"><User size={14} className="text-gray-500" /></div>
+                            )}
+                            <span className="font-bold text-gray-300">{p.name}</span>
+                            {players.length > 0 && players[0].id === p.id && <span className="text-[9px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30 whitespace-nowrap">👑 Host</span>}
+                         </div>
+                         <div>
+                            {p.secret_character === 'hotseat' && <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Hot Seat 🔥</span>}
+                            {p.secret_character === 'guesser' && <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Guesser 🕵️</span>}
+                            {(p.secret_character !== 'hotseat' && p.secret_character !== 'guesser') && <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">Selecting...</span>}
+                         </div>
+                      </div>
+                   ))}
+                </div>
+
+                {isHost && (
+                   <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleStartMatch} disabled={players.length < 2} className="w-full font-bold py-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-4 flex items-center justify-center gap-2">
+                     <Play fill="currentColor" size={18} /> {players.length < 2 ? "Waiting for players..." : "Start Match"}
+                   </motion.button>
+                )}
+                {!isHost && (
+                   <div className="text-center text-gray-500 font-bold uppercase tracking-widest mt-6">
+                     Waiting for Host to start...
+                   </div>
+                )}
+             </motion.div>
+          )}
+
           {gameState === 'draft' && (
             <motion.div key="draft" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-lg bg-neutral-900 border border-neutral-800 rounded-[2rem] p-8 shadow-2xl flex flex-col space-y-6 relative z-10">
               <div className="text-center space-y-2 border-b border-neutral-800 pb-6">
                 <ShieldAlert size={40} className="mx-auto text-rose-500 mb-4" />
-                <h2 className="text-3xl font-bold">
-                  {myPlayer.id === currentTarget.id ? "You are in the Hot Seat." : `${currentTarget.name} is in the Hot Seat.`}
+                <h2 className="text-3xl font-bold flex items-center justify-center gap-2">
+                  {players.length > 0 && currentTarget.id === players[0].id && <span className="text-amber-500 text-2xl relative -translate-y-[2px]" title="Host">👑</span>}
+                  <span>{myPlayer.id === currentTarget.id ? "You are in the Hot Seat." : `${currentTarget.name} is in the Hot Seat.`}</span>
                 </h2>
-                <p className="text-gray-400">Waiting for target to lock in character...</p>
+                <p className="text-gray-400 mt-2">Waiting for target to lock in character...</p>
               </div>
               
               {myPlayer.id === currentTarget.id ? (
@@ -805,11 +943,31 @@ export default function App() {
                     <label className="text-sm text-gray-400 mb-2 block uppercase tracking-wider font-bold">Character Name</label>
                     <input type="text" value={secretCharacter} onChange={(e) => setSecretCharacter(e.target.value)} placeholder="e.g., Gordon Ramsay" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 focus:border-rose-500 focus:outline-none text-lg" />
                   </div>
-                  <div>
-                    <label className="text-sm text-gray-400 mb-2 block uppercase tracking-wider font-bold">Starting Hint (Optional)</label>
-                    <input type="text" value={startingHint} onChange={(e) => setStartingHint(e.target.value)} placeholder="e.g., Known for being angry." className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 focus:border-rose-500 focus:outline-none" />
-                  </div>
-                  <motion.button whileHover={!isLockingIn ? { scale: 1.05 } : {}} whileTap={!isLockingIn ? { scale: 0.95 } : {}} onClick={handleLockIn} disabled={!secretCharacter || players.length < 2 || isLockingIn} className="w-full font-bold py-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  
+                  {!roomModifiers.noHints && (
+                    <div>
+                      <label className="text-sm text-gray-400 mb-2 block uppercase tracking-wider font-bold">Starting Hint (Required)</label>
+                      <input type="text" value={startingHint} onChange={(e) => setStartingHint(e.target.value)} placeholder="e.g., Known for being angry." className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-4 focus:border-rose-500 focus:outline-none" />
+                    </div>
+                  )}
+
+                  {roomModifiers.noHints && (
+                    <div className="bg-rose-950/30 border border-rose-900/50 p-4 rounded-xl flex items-start gap-3">
+                       <EyeOff className="text-rose-500 shrink-0" size={20} />
+                       <div>
+                          <span className="text-rose-400 font-bold block text-sm">Blind Interrogation Active</span>
+                          <span className="text-xs text-gray-400">You are not allowed to provide a starting hint this round.</span>
+                       </div>
+                    </div>
+                  )}
+
+                  <motion.button 
+                    whileHover={!isLockingIn ? { scale: 1.05 } : {}} 
+                    whileTap={!isLockingIn ? { scale: 0.95 } : {}} 
+                    onClick={handleLockIn} 
+                    disabled={!secretCharacter.trim() || (!roomModifiers.noHints && !startingHint.trim()) || players.length < 2 || isLockingIn} 
+                    className="w-full font-bold py-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                  >
                     {players.length < 2 ? "Waiting for players to join..." : isLockingIn ? "Locking In..." : "Lock In Target"}
                   </motion.button>
                 </div>
@@ -819,18 +977,47 @@ export default function App() {
                    <p className="text-xl uppercase tracking-widest font-bold">Waiting for {currentTarget.name}...</p>
                 </div>
               )}
+
+              {isHost && (
+                <div className="mt-8 border-t border-neutral-800 pt-6">
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Host Settings: Modifiers</h3>
+                  <div className="flex flex-col gap-4">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={roomModifiers.suddenDeath || false} onChange={(e) => handleModifierToggle('suddenDeath', e.target.checked)} className="w-5 h-5 accent-rose-500 rounded bg-neutral-800 border-neutral-700" />
+                      <div>
+                         <span className="text-white font-bold flex items-center gap-2 group-hover:text-rose-400 transition-colors"><Skull size={16} /> Sudden Death</span>
+                         <span className="text-xs text-gray-500">1 wrong guess = instant elimination.</span>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={roomModifiers.noHints || false} onChange={(e) => handleModifierToggle('noHints', e.target.checked)} className="w-5 h-5 accent-amber-500 rounded bg-neutral-800 border-neutral-700" />
+                      <div>
+                         <span className="text-white font-bold flex items-center gap-2 group-hover:text-amber-400 transition-colors"><EyeOff size={16} /> Blind Interrogation</span>
+                         <span className="text-xs text-gray-500">Target cannot give a starting hint.</span>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={roomModifiers.highStakes || false} onChange={(e) => handleModifierToggle('highStakes', e.target.checked)} className="w-5 h-5 accent-purple-500 rounded bg-neutral-800 border-neutral-700" />
+                      <div>
+                         <span className="text-white font-bold flex items-center gap-2 group-hover:text-purple-400 transition-colors"><Flame size={16} /> High Stakes</span>
+                         <span className="text-xs text-gray-500">Wrong guesses give the Target double points.</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
           {gameState === 'playing' && (
             <motion.div key="playing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full max-w-md md:max-w-none md:w-[95vw] lg:w-[90vw] 2xl:max-w-[1500px] bg-neutral-900 border border-neutral-800 rounded-3xl md:rounded-[2rem] overflow-hidden shadow-2xl flex flex-col md:flex-row h-[82vh] relative z-10">
               <div className="md:p-6 lg:p-8 border-b md:border-b-0 md:border-r border-neutral-800 bg-neutral-900/80 backdrop-blur-sm flex md:flex-col justify-between items-start md:w-80 lg:w-96 flex-shrink-0 z-10 h-auto md:h-full">
-                <div className="w-full flex flex-col">
-                  <div className="w-full flex border-b border-neutral-800 mb-4 bg-neutral-950/50 rounded-t-xl overflow-hidden px-4 py-3 items-center justify-center gap-2 text-indigo-400 font-bold uppercase tracking-widest text-xs">
+                <div className="w-full flex flex-col overflow-hidden">
+                  <div className="w-full flex border-b border-neutral-800 mb-4 bg-neutral-950/50 rounded-t-xl overflow-hidden px-4 py-3 items-center justify-center gap-2 text-indigo-400 font-bold uppercase tracking-widest text-xs flex-shrink-0">
                     <Lightbulb size={14} /> Intel Log
                   </div>
                   
-                  <div className="flex flex-col space-y-3 w-full max-h-32 md:max-h-[50vh] overflow-y-auto px-4 md:px-0 pr-2 scrollbar-hide">
+                  <div className="flex flex-col space-y-3 w-full h-32 md:h-[50vh] overflow-y-auto px-4 md:px-0 pr-2 pb-4 scrollbar-hide">
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-xs text-gray-500 uppercase tracking-widest">Live Activity</span>
                     </div>
@@ -847,23 +1034,28 @@ export default function App() {
                           <div>
                             {log.isCorrect ? (
                               <span className="text-emerald-400 font-bold">✅ {log.player} guessed correctly!</span>
-                            ) : hasSecretAccess ? (
+                            ) : (myPlayer.id === currentTarget.id || myPlayer.name === log.player) ? (
                               <span className="text-rose-400 font-bold">❌ {log.player} guessed: "{log.actualGuess}"</span>
                             ) : (
                               <span className="text-gray-500 italic">❌ {log.player} guessed incorrectly.</span>
                             )}
                           </div>
                         )}
+                        {log.type === 'system' && (
+                          <div><span className="text-amber-500 font-bold">⚠️ {log.text}</span></div>
+                        )}
                         {log.type === 'tap_out' && (
                           <div><span className="text-gray-500 italic">🏳️ {log.player} gave up and tapped out.</span></div>
                         )}
                       </div>
                     ))}
+                    {/* Auto-scroll anchor */}
+                    <div ref={logEndRef} />
                   </div>
                 </div>
 
                 {!myPlayer.has_guessed_correctly && !myPlayer.is_target && !myPlayer.is_eliminated && (
-                  <div className="w-full pt-4 mt-4 border-t border-neutral-800">
+                  <div className="w-full pt-4 mt-auto border-t border-neutral-800 flex-shrink-0">
                     <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleTapOut} className="w-full bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-400 font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest">
                       <Flag size={14} /> Tap Out (Give Up)
                     </motion.button>
@@ -879,15 +1071,34 @@ export default function App() {
                         
                         <div className="relative flex justify-center">
                           <ScoreFloater score={player.score} />
-                          <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center border-2 relative ${player.is_eliminated ? 'border-rose-500 bg-rose-500/10' : player.has_guessed_correctly ? 'border-emerald-500 bg-emerald-500/10' : player.is_current_turn ? 'border-indigo-500 bg-indigo-500/10' : player.is_target ? 'border-rose-500 bg-rose-500/10' : 'border-neutral-700 bg-neutral-800'}`}>
-                            {player.is_eliminated ? <X size={28} className="text-rose-500" /> : player.has_guessed_correctly ? <Check size={28} className="text-emerald-500" /> : <User size={24} />}
+                          <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center border-2 relative overflow-hidden ${player.is_eliminated ? 'border-rose-500 bg-rose-500/10' : player.has_guessed_correctly ? 'border-emerald-500 bg-emerald-500/10' : player.is_current_turn ? 'border-indigo-500 bg-indigo-500/10' : player.is_target ? 'border-rose-500 bg-rose-500/10' : 'border-neutral-700 bg-neutral-800'}`}>
+                            {player.is_eliminated ? (
+                               <>
+                                  {player.avatar_url && <img src={player.avatar_url} className="absolute inset-0 w-full h-full object-cover opacity-30 grayscale" alt={player.name} />}
+                                  <X size={28} className="text-rose-500 relative z-10" />
+                               </>
+                            ) : player.has_guessed_correctly ? (
+                               <>
+                                  {player.avatar_url && <img src={player.avatar_url} className="absolute inset-0 w-full h-full object-cover opacity-30" alt={player.name} />}
+                                  <Check size={28} className="text-emerald-500 relative z-10" />
+                               </>
+                            ) : player.avatar_url ? (
+                               <img src={player.avatar_url} className="w-full h-full object-cover" alt={player.name} />
+                            ) : (
+                               <User size={24} />
+                            )}
                           </div>
                         </div>
 
                         <div className="bg-neutral-900 text-xs font-bold px-2 py-0.5 rounded-md border border-neutral-700 whitespace-nowrap z-10 mt-2">
                           {player.score} pts
                         </div>
-                        <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-gray-400 mt-1">{player.name}</span>
+                        <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-gray-400 mt-1 flex items-center justify-center gap-1">
+                          {players.length > 0 && player.id === players[0].id && (
+                             <span className="text-amber-500 relative -translate-y-[2px]" title="Host">👑</span>
+                          )}
+                          <span>{player.name}</span>
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -900,13 +1111,19 @@ export default function App() {
                         <span className="text-4xl md:text-6xl">❓</span>
                       </div>
                       <div className="space-y-3 flex flex-col items-center">
-                        <h2 className="text-2xl md:text-5xl font-bold">
+                        <h2 className="text-2xl md:text-5xl font-bold flex items-center justify-center gap-2">
                           {myPlayer.id === currentTarget.id ? (
                             <span>You are in the <span className="text-rose-500">Hot Seat</span></span>
                           ) : (
                             <span>Target: <span className="text-rose-500">{currentTarget.name}</span></span>
                           )}
                         </h2>
+
+                        <div className="flex gap-2 justify-center mt-1 flex-wrap">
+                          {roomModifiers.suddenDeath && <span className="bg-rose-900/40 border border-rose-500/30 text-rose-400 text-[10px] px-2 py-1 rounded-full uppercase tracking-widest font-bold flex items-center gap-1"><Skull size={10} /> Sudden Death</span>}
+                          {roomModifiers.noHints && <span className="bg-amber-900/40 border border-amber-500/30 text-amber-400 text-[10px] px-2 py-1 rounded-full uppercase tracking-widest font-bold flex items-center gap-1"><EyeOff size={10} /> Blind</span>}
+                          {roomModifiers.highStakes && <span className="bg-purple-900/40 border border-purple-500/30 text-purple-400 text-[10px] px-2 py-1 rounded-full uppercase tracking-widest font-bold flex items-center gap-1"><Flame size={10} /> High Stakes</span>}
+                        </div>
                         
                         {hasSecretAccess && currentTarget.secret_character && (
                            <div className="mt-2 text-rose-400 font-bold tracking-widest uppercase border border-rose-500/30 bg-rose-500/10 px-4 py-2 rounded-full text-xs">
@@ -990,7 +1207,15 @@ export default function App() {
                 {sortedPlayers.map((p, i) => (
                   <div key={p.id} className="flex justify-between items-center p-4 rounded-xl bg-neutral-800/50 border border-neutral-700">
                     <div className="flex flex-col">
-                      <span className="font-bold text-lg">{p.name}</span>
+                      <span className="font-bold text-lg flex items-center gap-2">
+                        {players.length > 0 && p.id === players[0].id && <span className="text-amber-500 text-sm relative -translate-y-[2px]" title="Host">👑</span>}
+                        {p.avatar_url ? (
+                           <img src={p.avatar_url} className="w-6 h-6 rounded-full object-cover border border-neutral-700 ml-1" alt="avatar" />
+                        ) : (
+                           <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700 ml-1"><User size={10} className="text-gray-500" /></div>
+                        )}
+                        {p.name}
+                      </span>
                       <span className="text-xs text-gray-500 font-medium">Questions Asked: {p.questions_asked || 0}</span>
                     </div>
                     <span className="font-bold text-2xl">{p.score} pts</span>
@@ -1026,7 +1251,15 @@ export default function App() {
                     <div className="flex items-center gap-3">
                       <span className={`text-xl font-black ${i === 0 ? 'text-amber-500' : 'text-gray-500'}`}>#{i + 1}</span>
                       <div className="flex flex-col">
-                         <span className="font-bold text-lg">{p.name}</span>
+                         <span className="font-bold text-lg flex items-center gap-2">
+                           {players.length > 0 && p.id === players[0].id && <span className="text-amber-500 text-sm relative -translate-y-[2px]" title="Host">👑</span>}
+                           {p.avatar_url ? (
+                               <img src={p.avatar_url} className="w-6 h-6 rounded-full object-cover border border-neutral-700 ml-1" alt="avatar" />
+                            ) : (
+                               <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700 ml-1"><User size={10} className="text-gray-500" /></div>
+                            )}
+                           {p.name}
+                         </span>
                          <span className="text-xs text-gray-500 font-medium">Total Questions: {p.questions_asked || 0}</span>
                       </div>
                     </div>
